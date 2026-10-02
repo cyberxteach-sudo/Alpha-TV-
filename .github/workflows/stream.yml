@@ -1,0 +1,53 @@
+name: 24/7 HLS Live Stream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *' # প্রতি ৫ ঘণ্টা পর পর অটো রিস্টার্ট (GitHub Actions Limit বাইপাস করতে)
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install FFmpeg, Fonts & Cloudflared
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-freefont-ttf wget
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
+
+      - name: Start Secure Server, Tunnel & Stream
+        run: |
+          # ১. ব্যাকগ্রাউন্ডে সিকিউর HLS সার্ভার চালু করা
+          python server.py &
+          
+          # ২. ব্যাকগ্রাউন্ডে ক্লাউডফ্লেয়ার টানেল চালু করা
+          cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          
+          # টানেল তৈরি হতে ৫ সেকেন্ড অপেক্ষা
+          sleep 5
+          
+          # ৩. লগে সুন্দরভাবে পাবলিক স্ট্রিমিং লিঙ্ক প্রিন্ট করা
+          echo "=================================================="
+          echo "           YOUR SECURE HLS STREAM URL             "
+          echo "=================================================="
+          TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare\.com' tunnel.log | head -n 1)
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "PLAYLIST URL: ${TUNNEL_URL}/live.m3u8"
+          else
+            echo "[-] Tunnel URL not found in log yet. Check tunnel.log if needed."
+          fi
+          echo "=================================================="
+          
+          # ৪. প্রধান স্ট্রিমিং প্রসেস চালু করা
+          python stream.py
+          
